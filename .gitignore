@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+.env.local
+.env.*.local
+
+# Project specific
+DownloadTests/
+downloads/
+logs/
+*.mp4
+*.part
+ffmpeg2pass*
+bot_deploy.tar.gz
+bot_deploy.zip
+
+# Tests
+test_*.py
+compressed_test.mp4
+reproduction_*.py
+
+# Meta/Internal
+Agents.md
+bot_skeleton.py
+LLM_PROMPT.md
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store

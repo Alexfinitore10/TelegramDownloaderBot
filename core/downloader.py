@@ -24,15 +24,13 @@ class Downloader:
             return ydl.extract_info(url, download=False)
 
     async def download(self, url):
+        from config import DOWNLOAD_DIR
         ydl_opts = {
-            # Prefer MP4s under 50MB natively.
-            # If unavailable, prefer MP4s <= 720p resolution.
-            # Fallback to general best format if the above criteria aren't met.
-            'format': 'best[ext=mp4][filesize<50M]/best[ext=mp4][height<=720]/best[ext=mp4]/best',
-            'outtmpl': os.path.join(self.download_dir, '%(title)s.%(ext)s'),
-            'max_filesize': 50 * 1024 * 1024, # yt-dlp will still abort if it picks a format > 50MB
-            # Use node as JS runtime if available for extraction
-            'js_runtime': 'node',
+            # Prefer MP4s but don't limit size here, our processor will handle it
+            'format': 'best[ext=mp4]/best',
+            # Use video ID as filename to avoid "File name too long" errors
+            'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
+            'js_runtime': 'node', # Try to use node if available
         }
         
         try:
