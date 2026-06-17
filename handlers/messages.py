@@ -46,57 +46,68 @@ async def handle_text_message(message: types.Message):
         # We wait our turn in the queue
         async with processing_semaphore:
             status_msg = await message.reply(f"🎬 Video detected! Starting processing...")
-            temp_files = []
             
             try:
                 # 1. Download
                 await status_msg.edit_text("⏳ Downloading media...")
-                media_info = await downloader.download(url)
-                if not media_info:
-                    await status_msg.edit_text("❌ Failed to download video. It might be restricted.")
+                media_infos = await downloader.download(url)
+                if not media_infos:
+                    domain = extractor.get_domain(url)
+                    await status_msg.edit_text(f"❌ Could not find any video in this {domain} link.\n\nNote: Currently, I only support video downloads. Photos/Stories might not work yet.")
                     continue
                 
-                # Duration Check
-                duration = media_info.get('duration', 0)
-                if duration and duration > 1800: # 30 minutes
-                    await status_msg.edit_text(f"⚠️ Video is too long ({int(duration/60)} min). Maximum allowed is 30 minutes.")
-                    if os.path.exists(media_info['filename']):
-                        os.remove(media_info['filename'])
-                    continue
-
-                temp_files.append(media_info['filename'])
-                
-                # 2. Process/Compress with Progress Bar
-                async def progress_update(percent, status_text=None):
-                    bar_length = 10
-                    filled_length = int(bar_length * percent / 100)
-                    bar = "▣" * filled_length + "▢" * (bar_length - filled_length)
-                    text = f"⚙️ Optimizing video...\n`[{bar}]` {percent}%\n"
-                    if status_text:
-                        text += f"_{status_text}_"
+                for i, media_info in enumerate(media_infos):
+                    temp_files = []
                     try:
-                        await status_msg.edit_text(text, parse_mode="Markdown")
-                    except Exception: pass
+                        prefix = f"[{i+1}/{len(media_infos)}] " if len(media_infos) > 1 else ""
+                        
+                        # Duration Check
+                        duration = media_info.get('duration', 0)
+                        if duration and duration > 1800: # 30 minutes
+                            await message.reply(f"⚠️ {prefix}Video is too long ({int(duration/60)} min). Maximum allowed is 30 minutes.")
+                            if os.path.exists(media_info['filename']):
+                                os.remove(media_info['filename'])
+                            continue
 
-                final_path = await Processor.compress_if_needed(
-                    media_info['filename'], 
-                    target_size_mb=config.MAX_FILE_SIZE_MB,
-                    progress_callback=progress_update
-                )
-                if final_path != media_info['filename']:
-                    temp_files.append(final_path)
-                
-                # 3. Upload
-                final_size = os.path.getsize(final_path) / (1024 * 1024)
-                logger.info(f"Final file size: {final_size:.2f}MB")
-                await status_msg.edit_text(f"📤 Uploading to Telegram ({final_size:.2f}MB)...")
-                
-                video = types.FSInputFile(final_path)
-                await message.reply_video(
-                    video=video,
-                    caption=f"✅ {media_info['title']}",
-                    supports_streaming=True
-                )
+                        temp_files.append(media_info['filename'])
+                        
+                        # 2. Process/Compress with Progress Bar
+                        async def progress_update(percent, status_text=None):
+                            bar_length = 10
+                            filled_length = int(bar_length * percent / 100)
+                            bar = "▣" * filled_length + "▢" * (bar_length - filled_length)
+                            text = f"⚙️ {prefix}Optimizing video...\n`[{bar}]` {percent}%\n"
+                            if status_text:
+                                text += f"_{status_text}_"
+                            try:
+                                await status_msg.edit_text(text, parse_mode="Markdown")
+                            except Exception: pass
+
+                        final_path = await Processor.compress_if_needed(
+                            media_info['filename'], 
+                            target_size_mb=config.MAX_FILE_SIZE_MB,
+                            progress_callback=progress_update
+                        )
+                        if final_path != media_info['filename']:
+                            temp_files.append(final_path)
+                        
+                        # 3. Upload
+                        final_size = os.path.getsize(final_path) / (1024 * 1024)
+                        logger.warning(f"File pronto per l'invio: {final_path} ({final_size:.2f}MB)")
+                        await status_msg.edit_text(f"📤 {prefix}Uploading to Telegram ({final_size:.2f}MB)...")
+                        
+                        video = types.FSInputFile(final_path)
+                        await message.reply_video(
+                            video=video,
+                            caption=f"✅ {media_info['title']}",
+                            supports_streaming=True
+                        )
+                        logger.warning(f"✅ Video inviato con successo: {media_info['title']}")
+                    finally:
+                        for f in temp_files:
+                            if os.path.exists(f):
+                                try: os.remove(f)
+                                except: pass
                 
                 await status_msg.delete()
                     
@@ -113,9 +124,3 @@ async def handle_text_message(message: types.Message):
                     await status_msg.edit_text(f"❌ Error during processing: {str(e)[:100]}")
                 except:
                     pass
-            finally:
-                # 4. Robust Cleanup - MUST happen before releasing the semaphore to free space
-                for f in temp_files:
-                    if os.path.exists(f):
-                        try: os.remove(f)
-                        except: pass

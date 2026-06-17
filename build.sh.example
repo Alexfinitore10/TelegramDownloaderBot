@@ -1,0 +1,98 @@
+#!/bin/bash
+
+# Configuration
+VERSION=$(cat version.txt)
+PROJECT_NAME="TelegramDownloaderBot"
+BUILD_DIR="builds"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+FILENAME="${PROJECT_NAME}_v${VERSION}_${TIMESTAMP}.tar.gz"
+REMOTE_HOST="your_server_ip"
+REMOTE_USER="your_username"
+REMOTE_PATH="/home/your_username"
+
+echo "🚀 Creazione build CHIRURGICA v$VERSION..."
+
+# Ensure builds directory exists
+mkdir -p "$BUILD_DIR"
+
+# Create a temporary directory for staging
+STAGING_DIR="build_staging"
+rm -rf "$STAGING_DIR"
+mkdir -p "$STAGING_DIR"
+
+echo "📦 Copia dei soli file necessari..."
+
+# WHITELIST: Copiamo solo i file vitali
+cp -r core "$STAGING_DIR/"
+cp -r handlers "$STAGING_DIR/"
+cp main.py "$STAGING_DIR/"
+cp config.py "$STAGING_DIR/"
+cp requirements.txt "$STAGING_DIR/"
+cp version.txt "$STAGING_DIR/"
+cp CHANGELOG.md "$STAGING_DIR/"
+cp Dockerfile "$STAGING_DIR/"
+cp docker-compose.yml "$STAGING_DIR/"
+cp .env.example "$STAGING_DIR/"
+cp verify_remote.sh "$STAGING_DIR/"
+
+# Includiamo il .env locale come richiesto
+if [ -f ".env" ]; then
+    cp .env "$STAGING_DIR/"
+    echo "🔑 .env locale incluso nella build."
+else
+    echo "⚠️ .env locale NON TROVATO. La build potrebbe non funzionare sul server."
+fi
+
+echo "🗜️ Compressione..."
+tar -czf "$BUILD_DIR/$FILENAME" -C "$STAGING_DIR" .
+rm -rf "$STAGING_DIR"
+
+echo "✅ Build pronta: $BUILD_DIR/$FILENAME"
+
+echo "🧹 Pulizia vecchie build v$VERSION sul server remoto..."
+ssh "$REMOTE_USER@$REMOTE_HOST" "rm -f ${PROJECT_NAME}_v${VERSION}_*.tar.gz"
+
+echo "📤 Invio al server $REMOTE_HOST..."
+if scp "$BUILD_DIR/$FILENAME" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH"; then
+    echo "✨ File inviato. Eseguo aggiornamento remoto..."
+    
+    ssh "$REMOTE_USER@$REMOTE_HOST" "bash -s" << EOF
+        # 1. Creiamo la cartella per la nuova versione
+        NEW_DIR="bot_v$VERSION"
+        mkdir -p "\$NEW_DIR"
+        
+        # 2. Estraiamo i file
+        tar -xzf "$FILENAME" -C "\$NEW_DIR"
+
+        cd "\$NEW_DIR"
+
+        # 4. PULIZIA TOTALE E DEFINITIVA
+        echo "🧹 Rimozione forzata di ogni residuo precedente (vecchi nomi e nuovi)..."
+        
+        # Lista di nomi o pattern da eliminare assolutamente
+        # Becca: bot_v020-bot-1, tg_downloader_bot, tg_bot_api, ecc.
+        for pattern in "bot_v" "tg_downloader" "tg_bot_api" "telegramdownloaderbot"; do
+            # Trova tutti i container che contengono il pattern nel nome
+            IDS=\$(docker ps -aq --filter "name=\$pattern")
+            if [ -n "\$IDS" ]; then
+                echo "🛑 Terminazione container \$pattern: \$IDS"
+                docker rm -f \$IDS 2>/dev/null
+            fi
+        done
+
+        # Pulizia immagini orfane per forzare il rebuild pulito
+        echo "🗑️ Pulizia immagini vecchie..."
+        docker image prune -f
+        
+        # 5. Avvio nuova versione
+        echo "🚀 Avvio UNICA versione v$VERSION..."
+        # Usiamo il nome progetto fisso per essere sicuri
+        docker compose -p telegramdownloaderbot up --build -d
+
+        
+        echo "✅ AGGIORNAMENTO COMPLETATO!"
+        echo "🔍 Per verificare l'integrità, esegui: ./verify_remote.sh"
+EOF
+else
+    echo "❌ Invio fallito!"
+fi

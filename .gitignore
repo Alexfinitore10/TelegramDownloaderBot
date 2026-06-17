@@ -32,3 +32,8 @@ LLM_PROMPT.md
 .vscode/
 .idea/
 .DS_Store
+
+# Builds
+builds/
+main
+build.sh

@@ -81,11 +81,11 @@ class Processor:
                     '-preset', 'p4', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', output_path
                 ]
             else:
-                logger.info("Using CPU (VP9) with High Quality settings.")
+                logger.info("Using CPU (H.264) with fast settings.")
                 cmd = common_args + [
-                    '-c:v', 'libvpx-vp9', '-b:v', f'{video_bitrate_kbps}k', 
-                    '-crf', '30', '-deadline', 'good', '-cpu-used', '2', '-row-mt', '1',
-                    '-pix_fmt', 'yuv420p', '-c:a', 'libopus', '-b:a', '128k', output_path
+                    '-c:v', 'libx264', '-b:v', f'{video_bitrate_kbps}k', 
+                    '-preset', 'veryfast', '-crf', '28',
+                    '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', output_path
                 ]
 
             success = await Processor._run_ffmpeg_with_progress(cmd, duration, progress_callback)
@@ -93,12 +93,11 @@ class Processor:
             # Fallback if GPU failed or file is empty
             if not success or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
                 if 'nvenc' in str(cmd):
-                    logger.warning("GPU failed or produced empty file, falling back to HQ CPU...")
+                    logger.warning("GPU failed or produced empty file, falling back to CPU (x264)...")
                     if progress_callback: await progress_callback(0, "GPU failed, switching to CPU...")
                     cmd_cpu = common_args + [
-                        '-c:v', 'libvpx-vp9', '-crf', '31', '-b:v', '0',
-                        '-deadline', 'realtime', '-cpu-used', '4', '-row-mt', '1',
-                        '-pix_fmt', 'yuv420p', '-c:a', 'libopus', '-b:a', '128k', output_path
+                        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-b:v', f'{video_bitrate_kbps}k',
+                        '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', output_path
                     ]
                     success = await Processor._run_ffmpeg_with_progress(cmd_cpu, duration, progress_callback)
 

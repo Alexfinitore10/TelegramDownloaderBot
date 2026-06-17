@@ -15,3 +15,9 @@ class LinkExtractor:
 
     def filter_video_links(self, links):
         return [l for l in links if any(domain in l.lower() for domain in self.video_domains)]
+
+    def get_domain(self, url):
+        for domain in self.video_domains:
+            if domain in url.lower():
+                return domain
+        return "unknown"

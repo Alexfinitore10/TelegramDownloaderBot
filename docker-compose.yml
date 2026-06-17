@@ -1,23 +1,30 @@
+name: telegramdownloaderbot
+
 services:
   bot:
+    container_name: tg_downloader_bot
     build: .
     volumes:
       - ./DownloadTests:/app/DownloadTests
       - ./logs:/app/logs
       - .env:/app/.env
+    working_dir: /app
     depends_on:
       - telegram-bot-api
     environment:
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - DOWNLOAD_DIR=/app/DownloadTests
     restart: always
 
   telegram-bot-api:
+    container_name: tg_bot_api
     image: aiogram/telegram-bot-api:latest
     environment:
       - TELEGRAM_API_ID=${TELEGRAM_API_ID}
       - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
     volumes:
       - telegram-bot-data:/var/lib/telegram-bot-api
+      - ./DownloadTests:/app/DownloadTests
     command: --local --api-id=${TELEGRAM_API_ID} --api-hash=${TELEGRAM_API_HASH}
     restart: always
 
