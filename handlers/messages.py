@@ -19,12 +19,13 @@ async def handle_text_message(message: types.Message):
     
     # 0. Access Control
     is_owner = message.from_user.id == config.OWNER_ID
+    is_allowed_user = message.from_user.id in config.ALLOWED_USERS
     is_group = message.chat.type in ["group", "supergroup"]
     is_allowed_group = message.chat.id in config.ALLOWED_GROUPS
 
-    logger.debug(f"Access Check: owner={is_owner}, group={is_group}, allowed_group={is_allowed_group}")
+    logger.debug(f"Access Check: owner={is_owner}, allowed_user={is_allowed_user}, group={is_group}, allowed_group={is_allowed_group}")
 
-    if not (is_owner or (is_group and (not config.ALLOWED_GROUPS or is_allowed_group))):
+    if not (is_owner or is_allowed_user or (is_group and (not config.ALLOWED_GROUPS or is_allowed_group))):
         logger.warning(f"Access denied for user {message.from_user.id}")
         return
 
@@ -45,7 +46,7 @@ async def handle_text_message(message: types.Message):
     for url in video_links:
         # We wait our turn in the queue
         async with processing_semaphore:
-            status_msg = await message.reply(f"🎬 Video detected! Starting processing...")
+            status_msg = await message.reply(f"📥 Media detected! Starting processing...")
             
             try:
                 # 1. Download
@@ -53,7 +54,7 @@ async def handle_text_message(message: types.Message):
                 media_infos = await downloader.download(url)
                 if not media_infos:
                     domain = extractor.get_domain(url)
-                    await status_msg.edit_text(f"❌ Could not find any video in this {domain} link.\n\nNote: Currently, I only support video downloads. Photos/Stories might not work yet.")
+                    await status_msg.edit_text(f"❌ Could not find any supported media in this {domain} link.")
                     continue
                 
                 for i, media_info in enumerate(media_infos):
@@ -76,7 +77,7 @@ async def handle_text_message(message: types.Message):
                             bar_length = 10
                             filled_length = int(bar_length * percent / 100)
                             bar = "▣" * filled_length + "▢" * (bar_length - filled_length)
-                            text = f"⚙️ {prefix}Optimizing video...\n`[{bar}]` {percent}%\n"
+                            text = f"⚙️ {prefix}Optimizing media...\n`[{bar}]` {percent}%\n"
                             if status_text:
                                 text += f"_{status_text}_"
                             try:
@@ -96,13 +97,29 @@ async def handle_text_message(message: types.Message):
                         logger.warning(f"File pronto per l'invio: {final_path} ({final_size:.2f}MB)")
                         await status_msg.edit_text(f"📤 {prefix}Uploading to Telegram ({final_size:.2f}MB)...")
                         
-                        video = types.FSInputFile(final_path)
-                        await message.reply_video(
-                            video=video,
-                            caption=f"✅ {media_info['title']}",
-                            supports_streaming=True
-                        )
-                        logger.warning(f"✅ Video inviato con successo: {media_info['title']}")
+                        ext = os.path.splitext(final_path)[1].lower()
+                        media_file = types.FSInputFile(final_path)
+                        caption = f"✅ {media_info['title']}"
+                        
+                        if ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp']:
+                            await message.reply_photo(
+                                photo=media_file,
+                                caption=caption
+                            )
+                            logger.warning(f"✅ Foto inviata con successo: {media_info['title']}")
+                        elif ext in ['.gif']:
+                            await message.reply_animation(
+                                animation=media_file,
+                                caption=caption
+                            )
+                            logger.warning(f"✅ GIF inviata con successo: {media_info['title']}")
+                        else:
+                            await message.reply_video(
+                                video=media_file,
+                                caption=caption,
+                                supports_streaming=True
+                            )
+                            logger.warning(f"✅ Video inviato con successo: {media_info['title']}")
                     finally:
                         for f in temp_files:
                             if os.path.exists(f):

@@ -7,7 +7,10 @@ class LinkExtractor:
             'youtube.com', 'youtu.be', 
             'instagram.com', 'tiktok.com', 
             'twitter.com', 'x.com', 
-            'vimeo.com', 'facebook.com'
+            'vimeo.com', 'facebook.com',
+            'reddit.com', 'redd.it',
+            'threads.net', 'pinterest.com', 'pin.it',
+            'imgur.com', 'bsky.app'
         ]
 
     def extract_links(self, text):

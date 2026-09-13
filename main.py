@@ -147,21 +147,43 @@ async def check_and_notify_update(bot: Bot):
                 else:
                     changelog_text = content[:4000] # Fallback to first 4k chars
 
-        msg = f"🚀 **Bot Aggiornato alla v{current_version}**\n\nCosa c'è di nuovo:\n{changelog_text}"
+        import html
+        safe_changelog = html.escape(changelog_text)
+        safe_changelog = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', safe_changelog)
+        msg_html = f"🚀 <b>Bot Aggiornato alla v{current_version}</b>\n\nCosa c'è di nuovo:\n{safe_changelog}"
+        msg_plain = f"🚀 Bot Aggiornato alla v{current_version}\n\nCosa c'è di nuovo:\n{changelog_text}"
         
+        notified = False
         # Notify owner
         if config.OWNER_ID:
-            try: await bot.send_message(config.OWNER_ID, msg, parse_mode="Markdown")
-            except Exception as e: logger.error(f"Failed to notify owner: {e}")
+            try: 
+                await bot.send_message(config.OWNER_ID, msg_html, parse_mode="HTML")
+                notified = True
+            except Exception as e:
+                logger.warning(f"HTML notify failed for owner ({e}), falling back to plain text...")
+                try:
+                    await bot.send_message(config.OWNER_ID, msg_plain)
+                    notified = True
+                except Exception as e2:
+                    logger.error(f"Failed to notify owner: {e2}")
 
         # Notify allowed groups
         for group_id in config.ALLOWED_GROUPS:
-            try: await bot.send_message(group_id, msg, parse_mode="Markdown")
-            except Exception as e: logger.error(f"Failed to notify group {group_id}: {e}")
+            try: 
+                await bot.send_message(group_id, msg_html, parse_mode="HTML")
+                notified = True
+            except Exception as e:
+                logger.warning(f"HTML notify failed for group {group_id} ({e}), falling back to plain text...")
+                try:
+                    await bot.send_message(group_id, msg_plain)
+                    notified = True
+                except Exception as e2:
+                    logger.error(f"Failed to notify group {group_id}: {e2}")
 
-        # Save current version as last version
-        with open(last_version_file, "w") as f:
-            f.write(current_version)
+        # Save current version as last version solo se l'invio è andato a buon fine
+        if notified or (not config.OWNER_ID and not config.ALLOWED_GROUPS):
+            with open(last_version_file, "w") as f:
+                f.write(current_version)
 
 async def main():
     if not TELEGRAM_TOKEN:
@@ -191,6 +213,28 @@ async def main():
     async def cmd_start(message: types.Message):
         await message.answer("👋 Hi! I'm your automatic video downloader.\n\nJust send a link from YouTube, Instagram, TikTok, etc., and I'll send you the video back!")
 
+    @dp.message(Command("update_ytdlp"))
+    async def cmd_update_ytdlp(message: types.Message):
+        from config import OWNER_ID
+        if message.from_user.id != OWNER_ID:
+            return
+        
+        status_msg = await message.reply("🔄 Aggiornamento di yt-dlp in corso (forzando il download senza cache)...")
+        import subprocess
+        try:
+            # Esegue il comando pip install ignorando la cache
+            result = subprocess.run(
+                ["pip", "install", "--no-cache-dir", "-U", "https://github.com/yt-dlp/yt-dlp/archive/master.zip"],
+                capture_output=True, text=True, check=True
+            )
+            import html
+            safe_output = html.escape(result.stdout[:3500])
+            await status_msg.edit_text(f"✅ yt-dlp aggiornato con successo all'ultima versione master!\n\n<pre>{safe_output}</pre>", parse_mode="HTML")
+        except subprocess.CalledProcessError as e:
+            import html
+            safe_error = html.escape(e.stderr[:3500])
+            await status_msg.edit_text(f"❌ Errore durante l'aggiornamento:\n\n<pre>{safe_error}</pre>", parse_mode="HTML")
+
     @dp.message(Command("test_deltarune"))
     async def cmd_test_deltarune(message: types.Message):
         from config import OWNER_ID
@@ -215,7 +259,11 @@ async def main():
     # Avvio task del countdown
     asyncio.create_task(countdown_task(bot))
 
-    logger.warning("🤖 BOT AVVIATO - v0.2.0 è online e operativa!")
+    current_ver = "unknown"
+    if os.path.exists("version.txt"):
+        with open("version.txt", "r") as f:
+            current_ver = f.read().strip()
+    logger.warning(f"🤖 BOT AVVIATO - v{current_ver} è online e operativa!")
 
     # Graceful shutdown handling
     def signal_handler():

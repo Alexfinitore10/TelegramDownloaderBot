@@ -86,17 +86,16 @@ class Downloader:
         if info:
             duration = info.get('duration') or 0
         
-        # Strategia: alta qualità per video brevi, degradazione graduale per video lunghi
+        # Strategia: 1080p per video brevi, degradazione graduale per video lunghi
+        # (Evitiamo 4K: file enormi senza beneficio reale su mobile/Telegram)
         if duration == 0:
-            fmt = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best' # Preferiamo MP4 nativi
-        elif duration < 300: # < 5 minuti: Massima qualità
-            fmt = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-        elif duration < 900: # < 15 minuti: Fino a 1080p
-            fmt = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best'
-        elif duration < 1800: # < 30 minuti: Fino a 720p
-            fmt = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best'
-        else: # > 30 minuti: 480p
-            fmt = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best'
+            fmt = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/bestimage/best'
+        elif duration < 300: # < 5 minuti: Fino a 1080p
+            fmt = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/bestimage/best'
+        elif duration < 900: # < 15 minuti: Fino a 720p
+            fmt = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/bestimage/best'
+        else: # >= 15 minuti: Fino a 720p
+            fmt = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/bestimage/best'
 
         ydl_opts = {
             'format': fmt,
@@ -106,6 +105,8 @@ class Downloader:
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
+            'sleep_interval': 3,           # Delay tra richieste per evitare rate-limit YouTube
+            'max_sleep_interval': 6,       # Delay massimo randomizzato
         }
         
         try:
@@ -123,27 +124,47 @@ class Downloader:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             
+            def get_files_from_info(item_info):
+                files = []
+                if 'requested_downloads' in item_info:
+                    for rd in item_info['requested_downloads']:
+                        fp = rd.get('filepath') or rd.get('filename')
+                        if fp and os.path.exists(fp):
+                            files.append({
+                                'filename': fp,
+                                'title': item_info.get('title') or info.get('title') or 'Media',
+                                'duration': item_info.get('duration') or 0,
+                                'filesize': os.path.getsize(fp)
+                            })
+                if not files:
+                    filename = ydl.prepare_filename(item_info)
+                    if os.path.exists(filename):
+                        files.append({
+                            'filename': filename,
+                            'title': item_info.get('title') or info.get('title') or 'Media',
+                            'duration': item_info.get('duration') or 0,
+                            'filesize': os.path.getsize(filename)
+                        })
+                    else:
+                        base = os.path.splitext(filename)[0]
+                        for ext in ['.mp4', '.mkv', '.mov', '.jpg', '.jpeg', '.png', '.webp']:
+                            if os.path.exists(base + ext):
+                                files.append({
+                                    'filename': base + ext,
+                                    'title': item_info.get('title') or info.get('title') or 'Media',
+                                    'duration': item_info.get('duration') or 0,
+                                    'filesize': os.path.getsize(base + ext)
+                                })
+                                break
+                return files
+
+            results = []
             if 'entries' in info:
-                # It's a playlist or multi-video post
-                results = []
                 for entry in info['entries']:
                     if not entry:
                         continue
-                    filename = ydl.prepare_filename(entry)
-                    if os.path.exists(filename):
-                        results.append({
-                            'filename': filename,
-                            'title': entry.get('title') or info.get('title'),
-                            'duration': entry.get('duration'),
-                            'filesize': os.path.getsize(filename)
-                        })
-                return results
+                    results.extend(get_files_from_info(entry))
             else:
-                # It's a single video
-                filename = ydl.prepare_filename(info)
-                return [{
-                    'filename': filename,
-                    'title': info.get('title'),
-                    'duration': info.get('duration'),
-                    'filesize': os.path.getsize(filename)
-                }]
+                results.extend(get_files_from_info(info))
+                
+            return results

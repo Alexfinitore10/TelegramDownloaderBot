@@ -8,6 +8,11 @@ logger = logging.getLogger(__name__)
 class Processor:
     @staticmethod
     async def compress_if_needed(file_path, target_size_mb=100, progress_callback=None):
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']:
+            logger.info(f"File {file_path} is an image ({ext}), skipping video compression.")
+            return file_path
+
         current_size = os.path.getsize(file_path)
         if current_size <= target_size_mb * 1024 * 1024:
             return file_path

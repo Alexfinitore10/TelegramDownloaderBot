@@ -20,3 +20,4 @@ if not os.path.exists(DOWNLOAD_DIR):
 MAX_FILE_SIZE_MB = get_int_env("MAX_FILE_SIZE_MB", 100)
 OWNER_ID = get_int_env("OWNER_ID", 0)
 ALLOWED_GROUPS = [int(x) for x in os.getenv("ALLOWED_GROUPS", "").split(",") if x and x.strip().lstrip('-').isdigit()]
+ALLOWED_USERS = [int(x) for x in os.getenv("ALLOWED_USERS", "").split(",") if x and x.strip().isdigit()]
