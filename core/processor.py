@@ -15,7 +15,7 @@ class Processor:
 
         current_size = os.path.getsize(file_path)
         if current_size <= target_size_mb * 1024 * 1024:
-            return file_path
+            return await Processor._remux(file_path)
 
         output_path = file_path.rsplit('.', 1)[0] + '_compressed.mp4'
         logger.info(f"Compressing {file_path} as it exceeds limit ({current_size/1024/1024:.2f}MB).")
@@ -29,6 +29,36 @@ class Processor:
                 logger.info("Compressed file is larger than original. Keeping original.")
                 try: os.remove(output_path)
                 except: pass
+        return await Processor._remux(file_path)
+
+    @staticmethod
+    async def _remux(file_path):
+        if not file_path.lower().endswith('.mp4'):
+            return file_path
+
+        output_path = file_path.rsplit('.', 1)[0] + '_remux.mp4'
+        cmd = [
+            'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+            '-i', file_path,
+            '-map', '0:V:0', '-map', '0:a:0?',
+            '-c', 'copy', '-movflags', '+faststart',
+            output_path
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                logger.info(f"Remuxed {file_path} (forced stream mapping + faststart).")
+                return output_path
+            logger.warning(f"Remux failed for {file_path}, keeping original: {stderr.decode(errors='ignore').strip()[:200]}")
+        except Exception as e:
+            logger.warning(f"Remux error for {file_path}, keeping original: {e}")
+
+        if os.path.exists(output_path):
+            try: os.remove(output_path)
+            except: pass
         return file_path
 
     @staticmethod
@@ -76,7 +106,8 @@ class Processor:
             stdout, _ = await encoders_proc.communicate()
             encoders = stdout.decode()
             
-            common_args = ['-y', '-hide_banner', '-loglevel', 'info', '-stats', '-i', input_path]
+            common_args = ['-y', '-hide_banner', '-loglevel', 'info', '-stats', '-i', input_path,
+                           '-map', '0:V:0', '-map', '0:a:0?', '-movflags', '+faststart']
 
             if 'hevc_nvenc' in encoders:
                 logger.info("Using GPU HEVC (H.265) with high-quality settings.")
@@ -88,8 +119,9 @@ class Processor:
             else:
                 logger.info("Using CPU (H.264) with fast settings.")
                 cmd = common_args + [
-                    '-c:v', 'libx264', '-b:v', f'{video_bitrate_kbps}k', 
-                    '-preset', 'veryfast', '-crf', '28',
+                    '-c:v', 'libx264', '-b:v', f'{video_bitrate_kbps}k',
+                    '-maxrate', f'{int(video_bitrate_kbps * 1.5)}k', '-bufsize', f'{video_bitrate_kbps * 2}k',
+                    '-preset', 'veryfast',
                     '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', output_path
                 ]
 
@@ -101,7 +133,8 @@ class Processor:
                     logger.warning("GPU failed or produced empty file, falling back to CPU (x264)...")
                     if progress_callback: await progress_callback(0, "GPU failed, switching to CPU...")
                     cmd_cpu = common_args + [
-                        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-b:v', f'{video_bitrate_kbps}k',
+                        '-c:v', 'libx264', '-preset', 'veryfast', '-b:v', f'{video_bitrate_kbps}k',
+                        '-maxrate', f'{int(video_bitrate_kbps * 1.5)}k', '-bufsize', f'{video_bitrate_kbps * 2}k',
                         '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', output_path
                     ]
                     success = await Processor._run_ffmpeg_with_progress(cmd_cpu, duration, progress_callback)
